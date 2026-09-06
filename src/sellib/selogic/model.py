@@ -234,11 +234,9 @@ _4XX_COUNTER_RE = re.compile(
 # aliases each relay assigns -- and catching when the same bit is recorded at
 # different positions on different relays.
 
-import re as _re
-
-_SITM_RE = _re.compile(r"^(SITM|SNAME|SSET|SCLR|SHMI)(\d+)$")
-_SER_RE = _re.compile(r"^SER(\d+)$")
-_ALIAS_RE = _re.compile(r"^ALIAS(\d+)$")
+_SITM_RE = re.compile(r"^(SITM|SNAME|SSET|SCLR|SHMI)(\d+)$")
+_SER_RE = re.compile(r"^SER(\d+)$")
+_ALIAS_RE = re.compile(r"^ALIAS(\d+)$")
 
 
 #: (SITM|SNAME|SSET|SCLR|SHMI) -> (field name, kind).
@@ -367,11 +365,6 @@ def _reports_normalize(
     return gm
 
 
-# ---------------------------------------------------------------------------
-# 4xx normalizer (PROTSEL/AUTO via `LHS := RHS`)
-# ---------------------------------------------------------------------------
-
-# The suffixes that name the roles inside a composite variable.
 def _4xx_role_of(lhs: str) -> tuple[str, str, VarKind]:
     """Mapeia o LHS de 4xx para (variavel_canonica, papel, kind).
 
@@ -424,11 +417,11 @@ def _4xx_normalize_section(
             # Linha PROTSEL<N> ou AUTO_<N>: parse `LHS := RHS`
             lhs, rhs = _split_assignment(line.value)
             if lhs is None:
-                # Linha vazia ou mal-formada -- ignora silenciosamente.
-                if line.value.strip():
-                    # Content, but no `:=`: recorded as an anonymous
-                    # variable.
-                    pass
+                # A line with no `:=`. Empty ones are blank slots; a
+                # non-empty one is content in a shape this normaliser does
+                # not model, and it is dropped rather than filed under an
+                # invented name. Both are silent on purpose -- QuickSet emits
+                # them and a settings reader has no business failing over one.
                 continue
             base_name, role, var_kind = _4xx_role_of(lhs)
             # Campos de timer/counter podem ser numericos (PU/DO/PV).
