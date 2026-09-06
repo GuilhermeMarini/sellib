@@ -167,6 +167,11 @@ class ScdDocument:
         `extract_goose_subscriptions_by_ied`."""
         return _goose_subs_from_root(self.root)
 
+    def goose_rx_status_by_ied(self) -> dict[str, dict[str, GooseRxStatus]]:
+        """`{ied_name: {BIT: GooseRxStatus}}`. See
+        `extract_goose_rx_status_by_ied`."""
+        return _rx_status_from_root(self.root)
+
     def da_fcs(self) -> dict:
         """`{IED: {(ld_inst, ln, do, da): fc}}`. See `sel_da_fcs`."""
         return _da_fcs_from_root(self.root)
@@ -266,6 +271,51 @@ class GooseSubscription:
     src_cb_name: str
     desc: str | None = None         # `desc` do ExtRef (informativo)
     int_addr: str | None = None     # `intAddr` do ExtRef (informativo)
+    # The bit that receives THIS subscription's health, when SEL Architect
+    # declared one (`pubRxStatus`). `None` when the subscription maps no
+    # health bit, and always `None` for an SCD with no SEL private block.
+    # See `GooseRxStatus`.
+    rx_status_bit: str | None = None
+
+
+@dataclass(frozen=True)
+class GooseRxStatus:
+    """The bit that receives the HEALTH of one GOOSE subscription.
+
+    SEL Architect declares it as `pubRxStatus` on the
+    `<esel:GooseSubscription>` elements inside
+    `<Private type="SEL_GooseSubscription">`. The bit goes to 1 when the
+    publisher stops arriving, so it is not a signal out of the dataset --
+    reading it as one is how a GOOSE-health bit ends up presented as a
+    measurement nobody publishes.
+
+    Its `<ExtRef>` twin is recognisable on its own: publisher and control
+    block filled in, `doName` and `daName` both absent, because there is no
+    data attribute to point at. That shape agrees with `pubRxStatus` 203/203
+    in both directions across the two sample substations (60 IEDs), and it
+    is asserted as an invariant in the tests -- but it is NOT used as a
+    fallback here. `pubRxStatus` is the declared fact; inferring a health
+    bit from a shape is the same class of guess as reading a breaker's
+    position out of an undecorated Dbpos.
+
+    `serviceType` is NOT that discriminator, and measuring it is what ruled
+    it out: in `substation_demo.scd` all 202 health ExtRefs omit the
+    attribute entirely, so `goose_subscriptions_by_ied` never returned them;
+    in `IEC station 1.scd` the single health ExtRef carries
+    `serviceType="GOOSE"` and IS returned as a subscription. Two exports of
+    the same idea, disagreeing -- which is why a subscription carries
+    `rx_status_bit` rather than being filtered out: whether a health bit
+    shows up as a subscription is a property of the exporting tool, and a
+    caller must be able to tell what it is holding either way.
+
+    `bit` is whatever the attribute names: 197 of the corpus's 202 are
+    `VBnnn`, 5 are `RBnn`. Narrowing to virtual bits is a caller's job.
+    """
+    bit: str
+    publisher_ied: str
+    src_ld_inst: str
+    src_cb_name: str
+    dat_set: str | None = None
 
 
 def _gse_key(publisher_ied: str, ld_inst: str, cb_name: str) -> tuple[str, str, str]:
@@ -336,14 +386,77 @@ def extract_goose_subscriptions_by_ied(
     return {} if doc is None else doc.goose_subscriptions_by_ied()
 
 
-def _goose_subs_from_root(
+def extract_goose_rx_status_by_ied(
+    scd_path: Path,
+) -> dict[str, dict[str, GooseRxStatus]]:
+    """Read an SCD and return {ied_name: {BIT: GooseRxStatus}}.
+
+    For each `<IED>`, take every `<esel:GooseSubscription>` under
+    `<Private type="SEL_GooseSubscription">` that declares a `pubRxStatus`,
+    and key it by the bit that attribute names. An IED with no such
+    declaration -- and an SCD from a tool that writes no SEL private block at
+    all -- is simply absent from the result.
+
+    A bit is declared at most once per IED: it receives the health of one
+    subscription. Should a file name the same bit twice, the first wins and
+    the collision is logged, because two publishers feeding one health bit is
+    a configuration error worth seeing rather than a merge to perform here.
+
+    Parses on every call; see `ScdDocument` to read an SCD once.
+    """
+    doc = ScdDocument.load(scd_path)
+    return {} if doc is None else doc.goose_rx_status_by_ied()
+
+
+def _rx_status_from_root(
     root: ET.Element,
-) -> dict[str, list[GooseSubscription]]:
-    out: dict[str, list[GooseSubscription]] = {}
+) -> dict[str, dict[str, GooseRxStatus]]:
+    out: dict[str, dict[str, GooseRxStatus]] = {}
     for ied_el in _iter_local(root, "IED"):
         ied_name = ied_el.attrib.get("name") or ""
         if not ied_name:
             continue
+        bits: dict[str, GooseRxStatus] = {}
+        for sub in _iter_local(ied_el, "GooseSubscription"):
+            bit = (sub.attrib.get("pubRxStatus") or "").strip()
+            if not bit:
+                # A real subscription whose health is simply not mapped.
+                continue
+            if bit in bits:
+                _logger.warning(
+                    "%s: %s declarado como pubRxStatus mais de uma vez; "
+                    "mantendo o primeiro (%s)",
+                    ied_name, bit, bits[bit].src_cb_name,
+                )
+                continue
+            bits[bit] = GooseRxStatus(
+                bit=bit,
+                publisher_ied=(sub.attrib.get("iedName") or "").strip(),
+                src_ld_inst=(sub.attrib.get("ldInst") or "").strip(),
+                src_cb_name=(sub.attrib.get("cbName") or "").strip(),
+                dat_set=(sub.attrib.get("datSet") or None),
+            )
+        if bits:
+            out[ied_name] = bits
+    return out
+
+
+def _goose_subs_from_root(
+    root: ET.Element,
+) -> dict[str, list[GooseSubscription]]:
+    out: dict[str, list[GooseSubscription]] = {}
+    # The health bit is declared on the SEL private block, keyed by the
+    # control block it watches -- not on the ExtRef -- so it is resolved once
+    # per document and looked up as each subscription is built.
+    rx_by_ied = _rx_status_from_root(root)
+    for ied_el in _iter_local(root, "IED"):
+        ied_name = ied_el.attrib.get("name") or ""
+        if not ied_name:
+            continue
+        rx_by_cb = {
+            (s.publisher_ied, s.src_ld_inst, s.src_cb_name): s.bit
+            for s in rx_by_ied.get(ied_name, {}).values()
+        }
         seen: set[tuple[str, str, str]] = set()
         subs: list[GooseSubscription] = []
         for ext in _iter_local(ied_el, "ExtRef"):
@@ -366,6 +479,7 @@ def _goose_subs_from_root(
                 src_cb_name=cb,
                 desc=(ext.attrib.get("desc") or None),
                 int_addr=(ext.attrib.get("intAddr") or None),
+                rx_status_bit=rx_by_cb.get(key),
             ))
         if subs:
             out[ied_name] = subs
