@@ -224,6 +224,19 @@ def compute_size(info: dict, n_in: int, n_out: int) -> tuple[int, int]:
     return (min_w, max(min_h, h_for_ports))
 
 
+def _port_num(raw: str) -> int:
+    """A port index or `port_number` attribute as an int. 0 when it is not one.
+
+    The attribute comes out of a GLE inside an uploaded RDB, so a bare `int()`
+    on it is a `ValueError` that takes the whole page down rather than one
+    malformed port. Both readers of a port number go through here.
+    """
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
+
+
 def element_info(el: ET.Element) -> dict:
     etype = el.get("type", "?")
     le = el.find("logic_element")
@@ -244,7 +257,7 @@ def element_info(el: ET.Element) -> dict:
             tgt_mods = input_mods if grp_i == 0 else output_mods
             tgt_cmt = input_comments if grp_i == 0 else output_comments
             for p in pg.findall("port"):
-                idx = int(p.get("index", "0"))
+                idx = _port_num(p.get("index", "0"))
                 op = p.find("port_operator")
                 if op is not None:
                     tgt_mods[idx] = op.get("operator_type", "")
@@ -610,7 +623,7 @@ def render_symbol(info: dict, width: int | None = None,
             f'<text class="element-text" x="{x + w / 2}" y="{y + h / 2}">{safe_name}</text>'
         )
     return (
-        f'<g class="symbol-grp" id="el-{info["id"]}"{data}>'
+        f'<g class="symbol-grp" id="el-{html.escape(info["id"] or "")}"{data}>'
         f'{inner}'
         f'{op_svg}{cmt_svg}'
         f'</g>'
@@ -748,7 +761,7 @@ def render_gate(info: dict, n_in: int, n_out: int, label: str,
         f' data-connector="{html.escape(connector)}"' if connector else ""
     )
     return (
-        f'<g class="gate-grp" id="el-{info["id"]}" '
+        f'<g class="gate-grp" id="el-{html.escape(info["id"] or "")}" '
         f'data-type="{html.escape(etype)}"{out_attr}{conn_attr}>'
         f'{rect}{pins_in}{pins_out}{main_label}{sub_svg}{cmt_svg}'
         f'</g>'
@@ -1002,7 +1015,13 @@ def render_connection(conn: ET.Element, sink_mods: dict | None = None,
     pts = conn.findall(".//point")
     if len(pts) < 2:
         return ""
-    coords = " ".join(f"{pt.get('x')},{pt.get('y')}" for pt in pts)
+    # Escaped like every other attribute this module writes. `element_id`,
+    # the port numbers and the coordinates are XML attributes of a GLE that
+    # arrived inside somebody's RDB: for a real drawing they are digits and
+    # escaping is a no-op, and for a crafted one this is what stops the
+    # value closing the attribute it sits in.
+    coords = html.escape(
+        " ".join(f"{pt.get('x')},{pt.get('y')}" for pt in pts))
     src = conn.find("source_port")
     dst = conn.find("sink_port")
     src_id = src.get("element_id") if src is not None else ""
@@ -1012,16 +1031,18 @@ def render_connection(conn: ET.Element, sink_mods: dict | None = None,
     # Port modifiers (NOT/RTRIG/FTRIG), pre-computed by the caller.
     sink_mod = ""
     if sink_mods and dst_id:
-        sink_mod = sink_mods.get((dst_id, int(dp)), "")
+        sink_mod = sink_mods.get((dst_id, _port_num(dp)), "")
     src_mod = ""
     if source_mods and src_id:
-        src_mod = source_mods.get((src_id, int(sp)), "")
+        src_mod = source_mods.get((src_id, _port_num(sp)), "")
     return (
         f'<polyline class="connection" '
-        f'data-src="{src_id}" data-src-port="{sp}" '
-        f'data-dst="{dst_id}" data-dst-port="{dp}" '
-        f'data-sink-mod="{sink_mod}" '
-        f'data-src-mod="{src_mod}" '
+        f'data-src="{html.escape(src_id or "")}" '
+        f'data-src-port="{html.escape(sp or "")}" '
+        f'data-dst="{html.escape(dst_id or "")}" '
+        f'data-dst-port="{html.escape(dp or "")}" '
+        f'data-sink-mod="{html.escape(sink_mod)}" '
+        f'data-src-mod="{html.escape(src_mod)}" '
         f'points="{coords}"/>'
     )
 
