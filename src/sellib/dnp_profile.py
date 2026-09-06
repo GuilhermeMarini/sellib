@@ -72,6 +72,12 @@ _MODEL_RE = re.compile(r"SEL-([0-9]{3,4}[A-Z]{0,2}(?:-[0-9A-Z]{1,2})?)")
 # document is wanted, and it is the one XML that is neither.
 _SKIP_XML = ("xsd", "xslt")
 
+#: Ceiling on ONE decompressed member. The upload route caps the zip at 20 MB,
+#: which is the COMPRESSED size -- a few hundred KB of zeros expand past any
+#: memory a field laptop has. The largest real `dnpDP.xml` in the corpus is
+#: under 2 MB, so this is an order of magnitude of slack.
+MAX_MEMBER_BYTES = 64 * 1024 * 1024
+
 
 class DnpProfileError(Exception):
     """The bytes handed over are not a readable DNP3 device profile."""
@@ -192,6 +198,15 @@ def parse_zip(data: bytes, source_name: str = "") -> DnpProfile:
         candidates.sort(key=lambda n: (0 if "dnpdp" in n.lower() else 1, n))
         last: DnpProfileError | None = None
         for name in candidates:
+            try:
+                info = zf.getinfo(name)
+            except KeyError:                     # pragma: no cover - namelist
+                continue
+            if info.file_size > MAX_MEMBER_BYTES:
+                last = DnpProfileError(
+                    f"{name} descompacta para {info.file_size} bytes, acima "
+                    f"do limite de {MAX_MEMBER_BYTES}.")
+                continue
             try:
                 return _parse_xml(zf.read(name), source_name or name)
             except DnpProfileError as e:

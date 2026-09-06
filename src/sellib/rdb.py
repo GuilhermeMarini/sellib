@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import os
 import re
 import shutil
@@ -34,6 +35,8 @@ import olefile
 
 from sellib import _paths, rdb_cache
 from sellib.models import relay_models
+
+_logger = logging.getLogger(__name__)
 
 # Letters, digits, dot, hyphen, underscore and space survive in a name that
 # becomes a filesystem path. Everything else becomes "_".
@@ -128,6 +131,42 @@ def _relay_meta(extract_dir: Path, relay_name: str) -> tuple[str | None, str | N
     model = _read_relay_model(relay_dir)
     ip = _read_relay_ip(relay_dir, model)
     return model, ip
+
+
+#: What a path component may never be. `..` climbs out of the extraction, a
+#: separator invents a level, and NUL truncates the path at the syscall.
+_TRAVERSAL = frozenset({"", ".", ".."})
+
+
+def _safe_extract_path(target_dir: Path, entry) -> Path | None:
+    """Where one OLE stream may be written, or None if it may not be written.
+
+    `target_dir.joinpath(*entry)` took the storage path straight out of an
+    uploaded compound file. Real RDBs never carry anything but ordinary names
+    -- `Relays/<relay>/Misc/GL1.gle` -- but an RDB is exactly the artefact a
+    commissioning engineer receives from a third party, and this is the one
+    place a stranger's bytes become paths on disk.
+
+    Legitimate names pass through BYTE FOR BYTE, which is not a nicety: the
+    directory name is what `_relay_meta` looks the relay up by, and what
+    `dnp_map.discover` turns back into the OLE stream path it writes to. A
+    blanket `sanitize_name` here would rename the extraction out from under
+    both.
+    """
+    parts = []
+    for raw in entry:
+        name = str(raw)
+        if name in _TRAVERSAL or "/" in name or "\\" in name or "\x00" in name:
+            name = sanitize_name(name.replace("/", "_").replace("\\", "_"))
+            if name in _TRAVERSAL:
+                name = "_"
+        parts.append(name)
+    out = target_dir.joinpath(*parts)
+    try:
+        out.resolve().relative_to(target_dir.resolve())
+    except ValueError:
+        return None
+    return out
 
 
 def sanitize_name(name: str) -> str:
@@ -257,7 +296,12 @@ def _extract_and_collect(rdb_path: Path, target_dir: Path,
         for i, entry in enumerate(entries):
             if on_progress is not None and (i % step == 0):
                 on_progress(i, total, "Extraindo arquivos do RDB")
-            out_path = target_dir.joinpath(*entry)
+            out_path = _safe_extract_path(target_dir, entry)
+            if out_path is None:
+                _logger.warning(
+                    "[rdb] stream ignorado: o caminho sai da extracao (%r)",
+                    "/".join(str(e) for e in entry))
+                continue
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with ole.openstream(entry) as stream:
                 out_path.write_bytes(stream.read())

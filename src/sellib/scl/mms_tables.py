@@ -344,6 +344,19 @@ def _load() -> dict:
         return _CACHE
 
 
+def _group_key(group: str) -> tuple:
+    """Sort key for a table group. Numeric when it is a number.
+
+    Every shipped table uses a fixed-width three-digit group (`010`, `011`),
+    where a lexicographic `max()` happens to be right. It stops being right
+    the day a group is four digits or loses the padding, and the failure is
+    silent -- the wrong firmware's map loads and simply covers fewer bits,
+    which is indistinguishable on screen from a relay that publishes less.
+    """
+    text = str(group)
+    return (0, int(text), "") if text.isdigit() else (1, 0, text)
+
+
 def groups_for(part: str) -> list:
     return sorted(_load().get(norm_part(part), {}))
 
@@ -359,7 +372,7 @@ def lookup(part: str, group: str | None = None):
         return None
     if group is not None and str(group) in by_group:
         return by_group[str(group)]
-    return by_group[max(by_group)]
+    return by_group[max(by_group, key=_group_key)]
 
 
 def invalidate() -> None:

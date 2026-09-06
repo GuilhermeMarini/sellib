@@ -234,9 +234,15 @@ def compare_n(
     kind: Kind,
     dialect: sp.Dialect = "keyword",
 ) -> tuple[Verdict, str | None]:
-    """Compare N >= 2 values. The overall verdict is the WORST across every
-    pair (severity runs EQUAL < EQUAL_LOGIC_DIFF_COMMENT < EQUIVALENT <
-    DIFFERENT).
+    """Compare N >= 2 values against `values[0]`. Severity runs
+    EQUAL < EQUAL_LOGIC_DIFF_COMMENT < EQUIVALENT < DIFFERENT, and the worst
+    of those N-1 comparisons is the verdict.
+
+    Comparing against a PIVOT rather than across every pair is sound, and not
+    a shortcut: EQUAL and EQUIVALENT are both transitive, so `a == b` and
+    `a == c` give `b == c` for free, and the worst verdict cannot hide in a
+    pair the pivot did not touch. Do not "fix" this into O(N^2) -- it would
+    cost the truth table N^2/2 runs for the same answer.
 
     Per-pair notes are aggregated, first non-empty winning -- enough for the
     UI to label the most severe disagreement among the relays.

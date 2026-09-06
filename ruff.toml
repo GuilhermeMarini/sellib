@@ -10,7 +10,6 @@ ignore = ["E501"]
 # A tokenizer table: `toks.append(Tok(...)); i += 1; continue` on one line is
 # what makes the 14 branches read as the table they are.
 "src/sellib/selogic/parser.py" = ["E702"]
-"src/sellib/selogic/model.py" = ["E402"]
 
 [lint.isort]
 known-first-party = ["sellib"]

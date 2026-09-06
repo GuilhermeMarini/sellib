@@ -128,15 +128,24 @@ class WordbitSet:
         """
         if not self.validates(kind):
             return "ok"
+        # `always_valid_for(self)`, not `self.always_valid`: the placeholder
+        # set is domain-INDEPENDENT and never something a per-model file opts
+        # into. The duplicate check next door already unioned the defaults in
+        # and this did not, so a file that listed an `always_valid` of its own
+        # lost "NA", "0", "1" and "" here alone -- and a hundred free slots
+        # reading "NA" came back as a hundred unknown names, which is exactly
+        # the wall of false warnings this module's docstring says destroys
+        # the feature.
+        allowed = always_valid_for(self)
         raw = (value or "").strip().upper()
-        if raw in self.always_valid:
+        if raw in allowed:
             return "ok"
         names = self.domain(kind)
         tokens = names_in(kind, value)
         if not tokens:
             return "ok"
         for tok in tokens:
-            if tok in self.always_valid or tok in names:
+            if tok in allowed or tok in names:
                 continue
             if any(rx.match(tok) for rx, _label in self.patterns):
                 continue
@@ -389,6 +398,11 @@ def entry_from_profiles(profiles: list, existing: dict | None = None,
     model = base_model(profiles[0]) if profiles else \
         str(existing.get("model", "?"))
     bits = {str(b).strip().upper() for b in existing.get("bits", [])}
+    # A file that lists its own `always_valid` keeps exactly that list, which
+    # is what this function's docstring promises. It does NOT need the
+    # defaults folded in: `always_valid_for()` unions them at READ time, for
+    # every file and for no file at all, so a generated file that omits "NA"
+    # still has "NA" accepted. The `or` is the "no list at all" case only.
     always = {str(a).strip().upper()
               for a in existing.get("always_valid", [])} or set(
                   DEFAULT_ALWAYS_VALID)

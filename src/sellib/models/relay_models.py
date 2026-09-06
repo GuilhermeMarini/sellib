@@ -565,7 +565,13 @@ def _parse_analog_name_aliases(raw, source: Path) -> tuple:
 
 _CACHE: dict[str, RelayModel] = {}
 _ALIAS_INDEX: dict[str, RelayModel] = {}
-_LOADED = False
+# WHICH directories the cache was built from, not merely "was it built". A
+# bare boolean meant one call with an explicit `models_dir` -- a test, a tool,
+# an offline generator -- filled the process-wide cache with that directory's
+# contents, and every later `lookup()` from anywhere in the process answered
+# out of it. The other two registries (`wordbits`, `scl.mms_tables`) both
+# carry an `invalidate()`; this one had neither that nor a key.
+_LOADED_FROM: tuple[str, ...] | None = None
 
 
 def _normalize(key: str) -> str:
@@ -612,11 +618,12 @@ def load_relay_models(models_dir: Path | None = None,
     model wins. That is what lets someone add a model at runtime without the
     overlay having to repeat all the others.
     """
-    global _LOADED, _CACHE, _ALIAS_INDEX
-    if _LOADED and not force:
-        return _CACHE
+    global _LOADED_FROM, _CACHE, _ALIAS_INDEX
     bases = ([Path(models_dir)] if models_dir is not None
              else _paths.data_dirs("relay_models"))
+    key = tuple(str(b) for b in bases)
+    if _LOADED_FROM == key and not force:
+        return _CACHE
     cache: dict[str, RelayModel] = {}
     alias: dict[str, RelayModel] = {}
     for base in bases:
@@ -633,8 +640,21 @@ def load_relay_models(models_dir: Path | None = None,
                 alias.setdefault(_normalize(a), m)
     _CACHE = cache
     _ALIAS_INDEX = alias
-    _LOADED = True
+    _LOADED_FROM = key
     return cache
+
+
+def invalidate() -> None:
+    """Forget the loaded registry so the next lookup re-reads the directories.
+
+    The counterpart of `wordbits.invalidate()` and `scl.mms_tables.invalidate()`
+    -- the three registries are read the same way and drift the same way, and
+    this one was the only one a host could not reset.
+    """
+    global _LOADED_FROM, _CACHE, _ALIAS_INDEX
+    _LOADED_FROM = None
+    _CACHE = {}
+    _ALIAS_INDEX = {}
 
 
 def lookup(relaytype: str) -> RelayModel | None:
