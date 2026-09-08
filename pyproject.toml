@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SELlib"
-version = "3.0.0"
+version = "3.0.1"
 description = "Read and write the file formats an SEL protective relay project is made of: RDB, SET_*.TXT, DNP3 maps, GLE logic diagrams, SELOGIC and IEC 61850 SCL"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,11 +28,11 @@ dependencies = [
     "olefile>=0.47",
     "openpyxl>=3.1",
     "cfbwrite>=1.0",
-    # The pre-release is NAMED on purpose. PEP 440 sorts 0.3.0.dev2 BEFORE
-    # 0.3.0, so a plain `>=0.3.0` matches no published version today and
-    # makes sellib uninstallable. Switch to `py61850>=0.3.0` the day the
-    # final is published -- not before.
-    "py61850>=0.3.0.dev2",
+    # `>=0.3.0` and not `>=0.3.0.dev2`: the final is published, so the pin no
+    # longer has to name a pre-release. Keep it that way. PEP 440 sorts a
+    # `.devN` BEFORE its release, so naming one is both unnecessary once the
+    # final exists and a standing invitation for a resolver to install it.
+    "py61850>=0.3.0",
 ]
 
 [project.optional-dependencies]
