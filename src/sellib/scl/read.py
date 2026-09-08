@@ -73,6 +73,19 @@ def _iter_local(root: ET.Element, local_name: str):
             yield el
 
 
+def _children_local(node: ET.Element, local_name: str):
+    """The DIRECT CHILDREN whose local name is `local_name`.
+
+    Where the schema allows an element in exactly one place, this is the one
+    to use. `_iter_local` searches descendants, and a `<Private>` may legally
+    contain anything at all -- including elements whose names collide with
+    SCL's own. See `_ieds_from_root`.
+    """
+    for el in node:
+        if _strip_ns(el.tag) == local_name:
+            yield el
+
+
 def _collect_ip_by_ied(root: ET.Element) -> dict[str, str]:
     """Read <Communication> and return {iedName: the first IP found}."""
     out: dict[str, str] = {}
@@ -195,10 +208,30 @@ def load_scd(scd_path: Path) -> list[IedInfo]:
 
 
 def _ieds_from_root(root: ET.Element) -> list[IedInfo]:
+    """The IEDs of one parsed document.
+
+    Matches `<IED>` as a DIRECT CHILD of `<SCL>`, which is the only place the
+    schema allows one. Matching by descendant name instead is a real bug, not
+    a theoretical one: the DIGSI export in this project's corpus nests an
+    `<IED uuidRef=... name=...>` cross-reference inside
+    `<Private><FolderDetails><FolderInfo>` for every device, ahead of the real
+    element in document order. That file carries 28 elements named `IED` for
+    14 devices, and because the loop below keeps the FIRST of a repeated name,
+    every one of the 14 resolved to the decoy -- `relay_type`, `manufacturer`,
+    `description` and `configVersion` all `None`, on all 14.
+
+    The other walkers over `<IED>` in this module survive the same file by
+    accident: they either assign last-wins or skip an IED that contributes
+    nothing, so the real element overwrites or outlives the decoy. Only this
+    one keeps the first.
+    """
     ip_by_ied = _collect_ip_by_ied(root)
     ieds: list[IedInfo] = []
     seen: set[str] = set()
-    for el in _iter_local(root, "IED"):
+    # Direct children of <SCL>, which is the only place 61850-6 puts an
+    # <IED>. A descendant search reads a vendor's private bookkeeping as if
+    # it were a device: see this function's docstring.
+    for el in _children_local(root, "IED"):
         name = el.attrib.get("name")
         if not name or name in seen:
             continue
