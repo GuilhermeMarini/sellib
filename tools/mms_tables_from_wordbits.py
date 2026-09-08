@@ -33,9 +33,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from py61850 import fc_read_rank as _fc_rank  # noqa: E402
+from py61850.scl import SclDocument  # noqa: E402
+
 from sellib._paths import PACKAGE_DATA  # noqa: E402
-from sellib.scl.mms_tables import fc_rank as _fc_rank  # noqa: E402
-from sellib.scl.read import ScdDocument  # noqa: E402
+from sellib.scl.read import sel_short_addresses  # noqa: E402
 
 # The factory ICD corpus is not in any repository (231 MB of vendor
 # files); point SELLIB_ICD_FIXTURES at a local copy.
@@ -44,10 +46,12 @@ MMS_MAP_OUT = PACKAGE_DATA / "mms_map"  # noqa: E402
 
 CORPUS = {"411L", "451", "487E", "311C1", "751", "2414", "2440"}
 
-# FC_PREFERENCE and its rank helper now live in sellib/scl/mms_tables.py --
-# the library side of the same data -- so this generator and
-# PAC CT's live-SCD resolver import ONE definition
-# instead of keeping two copies that can drift apart silently.
+# The FC ranking lives in py61850 (`core/fc.py`), not here and not in sellib:
+# an FC is the same FC whether it was read out of a file or matched against a
+# live GetLogicalDeviceDirectory, so this generator and PAC CT's live-SCD
+# resolver import ONE definition instead of keeping copies that drift apart
+# silently. It ranks the full 61850-7-2 set; sellib's old tuple named 6 of
+# the 13, and the corpus uses 12.
 
 
 def norm(part: str) -> str:
@@ -106,26 +110,27 @@ def decorated_rows(scl_path: Path) -> dict:
     that disappears quietly later, when the live resolver checks it against
     the relay's own directory.
     """
-    # One parse for both questions: through the two module-level functions
-    # this ICD was parsed twice, and the parse is most of the cost.
     # `parse()` and not `load()` on purpose -- the strictness is the point
     # here, an ICD that will not parse must stop the generator rather than
     # produce a table missing whatever was in it.
-    doc = ScdDocument.parse(scl_path)
-    fcs_by_ied = doc.da_fcs()
+    #
+    # One walk, where there used to be two. `short_addresses` and `da_fcs`
+    # were separate passes over the same file, joined on a four-part key,
+    # because the sAddr walk could not see the type chain; py61850's model
+    # resolves the chain once and every attribute carries its own FC, so the
+    # point arrives complete and `da_fcs` has no reason to exist.
+    doc = SclDocument.parse(scl_path)
     best: dict = {}
-    for ied, points in doc.short_addresses().items():
-        fcs = fcs_by_ied.get(ied, {})
+    for _ied, points in sel_short_addresses(doc).items():
         for bit, p in points.items():
-            rule = getattr(p, "rule", None)
+            rule = p.rule
             if rule is None:
                 continue
-            fc = fcs.get((p.ld_inst, p.ln, p.do, p.da))
-            if not fc:
+            if not p.fc:
                 continue
             da = "$".join(p.da.split("."))
-            item = f"{p.ln}${fc}${p.do}${da}"
-            key = (_fc_rank(fc), p.ld_inst, item)
+            item = f"{p.ln}${p.fc}${p.do}${da}"
+            key = (_fc_rank(p.fc), p.ld_inst, item)
             if bit in best and key >= best[bit][0]:
                 continue
             best[bit] = (key, [p.ld_inst, item,

@@ -28,6 +28,11 @@ dependencies = [
     "olefile>=0.47",
     "openpyxl>=3.1",
     "cfbwrite>=1.0",
+    # The pre-release is NAMED on purpose. PEP 440 sorts 0.3.0.dev2 BEFORE
+    # 0.3.0, so a plain `>=0.3.0` matches no published version today and
+    # makes sellib uninstallable. Switch to `py61850>=0.3.0` the day the
+    # final is published -- not before.
+    "py61850>=0.3.0.dev2",
 ]
 
 [project.optional-dependencies]

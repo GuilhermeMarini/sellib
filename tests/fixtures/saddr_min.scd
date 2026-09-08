@@ -57,8 +57,24 @@
     </DOType>
     <DOType id="SPC_1" cdc="SPC">
       <DA name="stVal" fc="ST" bType="BOOLEAN"/>
-      <DA name="Oper" fc="CO" type="SPCOper"/>
+      <DA name="Oper" fc="CO" bType="Struct" type="SPCOper"/>
     </DOType>
+    <!-- `Oper`'s own type, and the `bType="Struct"` above that reaches it.
+         Both were missing here, and the omission was invisible for as long
+         as the reader walked the DOI/SDI/DAI elements: `Oper.ctlVal` was
+         found because the INSTANCE spells it out, whatever the templates
+         say. Resolving the type chain instead means a constructed attribute
+         has to be declared as one: 61850-6 makes `bType` mandatory on a
+         `DA` and spells a DAType reference `bType="Struct" type="..."`, and
+         every real ICD in the corpus does. Without these two, RB01 and
+         LOCSTA's command address simply do not exist. An XML comment may not
+         contain a double hyphen, so this one uses none. -->
+    <DAType id="SPCOper">
+      <BDA name="ctlVal" bType="BOOLEAN"/>
+      <BDA name="ctlNum" bType="INT8U"/>
+      <BDA name="T" bType="Timestamp"/>
+      <BDA name="Test" bType="BOOLEAN"/>
+    </DAType>
     <DOType id="DPC_1" cdc="DPC">
       <DA name="stVal" fc="ST" bType="Dbpos"/>
       <DA name="q" fc="ST" bType="Quality"/>

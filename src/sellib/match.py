@@ -36,12 +36,65 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from py61850.scl import SclDocument
+
 from sellib import rdb as rdb_loader
 from sellib.models import relay_models
-from sellib.scl import read as scd_loader
-from sellib.scl.read import IedInfo
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ScdIed:
+    """The three fields of an SCD's IED that a cross-match needs.
+
+    `py61850` splits these deliberately: identity is on `IedHeader`, which is
+    cheap and needs no instance tree, and the address is in `Communication`,
+    which names IEDs but contains none. Matching wants them together, and
+    joining them is this module's business rather than a general reader's --
+    an IED with several access points has several addresses, and which one
+    counts as "the" IP is a question only a consumer can answer.
+    """
+    name: str
+    ip: str | None
+    relay_type: str | None
+
+
+def _read_scd(scd_path: Path) -> list[ScdIed]:
+    """The SCD's IEDs with their first IP, or an empty list on a bad file.
+
+    Graceful, because the SCD came from a user: `SclDocument.load` gives None
+    and a log line rather than raising, and an unreadable file is reported as
+    "SCD vazio ou ilegivel" by the caller.
+    """
+    doc = SclDocument.load(scd_path)
+    if doc is None:
+        return []
+    ip_by_ied = doc.communication.ip_by_ied()
+    return [ScdIed(name=name, ip=ip_by_ied.get(name), relay_type=header.type)
+            for name, header in doc.ied_headers.items()]
+
+
+def _index_by_ip(ieds: list[ScdIed]) -> dict[str, ScdIed]:
+    """{ip -> ScdIed}, for the IEDs that have one. On a duplicate address the
+    first wins, and the duplicate is logged as a warning."""
+    out: dict[str, ScdIed] = {}
+    for ied in ieds:
+        if not ied.ip:
+            continue
+        if ied.ip in out:
+            _logger.warning(
+                "SCD: IP duplicado %s em IEDs %r e %r",
+                ied.ip, out[ied.ip].name, ied.name,
+            )
+            continue
+        out[ied.ip] = ied
+    return out
+
+
+def _index_by_name(ieds: list[ScdIed]) -> dict[str, ScdIed]:
+    """{iedName.upper() -> ScdIed}. Lookup case-insensitive."""
+    return {ied.name.upper(): ied for ied in ieds if ied.name}
 
 
 @dataclass(frozen=True)
@@ -228,9 +281,9 @@ def compare_relays_to_scd(
     scd_path = Path(scd_path)
 
     rdb_ids = _collect_rdb_identifiers(relays, extract_dir)
-    ieds = scd_loader.load_scd(scd_path)
-    by_ip = scd_loader.index_by_ip(ieds)
-    by_name = scd_loader.index_by_name(ieds)
+    ieds = _read_scd(scd_path)
+    by_ip = _index_by_ip(ieds)
+    by_name = _index_by_name(ieds)
 
     report = MatchReport()
     if not ieds:
@@ -244,7 +297,7 @@ def compare_relays_to_scd(
 
     used_scd_names: set[str] = set()
     for r in rdb_ids:
-        ied: IedInfo | None = None
+        ied: ScdIed | None = None
         matched_by = ""
         notes: list[str] = []
 
@@ -314,8 +367,8 @@ def compare_relays_to_scd(
 
 def _no_match_reason(
     r: RelayIdentifiers,
-    by_ip: dict[str, IedInfo],
-    by_name: dict[str, IedInfo],
+    by_ip: dict[str, ScdIed],
+    by_name: dict[str, ScdIed],
 ) -> str:
     bits = []
     if not r.ip and not r.rid:

@@ -94,7 +94,7 @@ def test_collapse_ranks_co_last_ahead_of_lexicographic_order():
     for 32 real bits, because the string "CO" sorts before "MX". `CO` must
     lose to every reading FC regardless of `ld`/`item` spelling, and `ST`
     must still beat `MX`. Fails if `_collapse` ever goes back to a plain
-    lexicographic tiebreak across FCs instead of `FC_PREFERENCE`."""
+    lexicographic tiebreak across FCs instead of `py61850.fc_read_rank`."""
     gen = _load_generator()
 
     co_vs_mx = [
@@ -179,12 +179,20 @@ class TestDaVocabulary:
                    "Oper$ctlVal", "dirGeneral"):
             assert not is_boolean_status(da), da
 
-    def test_both_separators_parse_the_same(self):
+    def test_both_separators_are_understood_the_same(self):
         """SCL descends an SDI with '.', MMS spells every level with '$'; the
-        SCD source and the shipped table source use one each."""
-        from sellib.scl.mms_tables import da_parts
-        assert da_parts("Oper.ctlVal") == da_parts("Oper$ctlVal")
-        assert da_parts("stVal") == ("stVal",)
+        SCD source and the shipped table source use one each.
+
+        Splitting a descent is `py61850.da_parts`' job now -- it is the same
+        split whether the name came out of a file or off the wire -- but that
+        both spellings reach the SAME verdict here is this module's contract,
+        so it is asserted through this module's own functions.
+        """
+        from sellib.scl.mms_tables import da_rank, is_boolean_status, is_enum_status
+        assert da_rank("Oper.ctlVal") == da_rank("Oper$ctlVal")
+        assert is_boolean_status("Oper.ctlVal") == is_boolean_status("Oper$ctlVal")
+        assert is_enum_status("Oper.ctlVal") == is_enum_status("Oper$ctlVal")
+        assert is_boolean_status("stVal")
 
     def test_status_beats_anything_else_beats_a_control(self):
         from sellib.scl.mms_tables import da_rank

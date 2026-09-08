@@ -21,7 +21,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
 
-from sellib.scl._xmlsafe import reject_dtd_in_bytes
+from py61850.scl import reject_dtd_in_bytes
 
 # Espacamento padrao entre portas verticais (em px do canvas GLE)
 PORT_SPACING = 12
