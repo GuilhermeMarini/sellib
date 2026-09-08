@@ -1,9 +1,26 @@
-"""The shipped bit -> MMS item tables, loaded lazily and memoised.
+"""The shipped bit -> MMS item tables, and the SEL grammars around them.
 
 Third per-model registry in this project, after `data/relay_models/` (GLV and
 the GLE tools) and `data/wordbits/` (the DNP map's name check). They come from
 different sources and drift; `tests/test_relay_models.py` fails on a model
 present in one and missing from another unless the asymmetry is written down.
+
+Everything here is SEL's, and that is the line the split with `py61850` drew.
+The standard half -- the functional constraints and their ranking, the two
+spellings of an attribute descent, the control model's own attributes -- left
+for `py61850.core`, because an FC is the same FC whether it was read out of a
+file or matched against a live `GetLogicalDeviceDirectory`, and a library that
+ranks one must not have to import an SEL package to do it. What stayed is the
+`db:` value grammar SEL puts inside the standard `sAddr` attribute, the
+name-only heuristics measured against SEL's own corpus, and this registry.
+
+The heuristics below are labelled as heuristics on purpose. `py61850`'s model
+now gives the TYPED answer -- `attr.btype` says `BOOLEAN` or `Enum` or `Dbpos`
+outright -- and where a type is in hand it is the better answer. These remain
+for the LIVE path, where a bit's name arrives from the relay's own directory
+with no `DataTypeTemplates` behind it. Promoting a name heuristic into a
+general library as though it were truth is exactly what `ENUM_STATUS_DOS`
+below documents the cost of.
 """
 
 from __future__ import annotations
@@ -14,6 +31,8 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+from py61850 import da_parts, fc_is_control_attribute
 
 from sellib import _paths
 
@@ -27,33 +46,6 @@ _CACHE: dict = {}
 # read stayed cached and the NEXT call returned half a registry in silence --
 # the 411L found, the 751 gone.
 _LOADED = False
-
-# Ordered FC preference for collapsing several 61850 points that share one
-# Relay Word bit -- or, on the live path, for asking a GetLogicalDeviceDirectory
-# which FC an SCD's LN$*$DO$DA actually landed under -- down to one. `CO`
-# (control) is last on purpose: it is a command that SETS a point, not a
-# reading of it, so picking it over `ST` (status) or `MX` (measurement) would
-# poll the wrong thing even though it happens to be reachable through the same
-# bit. `tools/mms_tables_from_wordbits.py` (the fallback-table generator) and
-# the PAC CT live-SCD resolver both import this same
-# tuple -- they must not keep two copies that can drift apart silently.
-FC_PREFERENCE = ("ST", "MX", "SP", "CF", "DC", "CO")
-
-
-def fc_rank(fc: str) -> tuple:
-    """Sort key for one candidate's FC: `(0, position in FC_PREFERENCE)` for
-    anything that is not `CO`, `(1, 0)` for `CO`. The two-tier shape is
-    deliberate -- it keeps `CO` strictly worse than every other FC, including
-    one absent from `FC_PREFERENCE` (the corpus also has a handful of `SG`,
-    setting-group, points), because `CO` is a command and everything else,
-    named or not, is still a reading.
-    """
-    if fc == "CO":
-        return (1, 0)
-    if fc in FC_PREFERENCE:
-        return (0, FC_PREFERENCE.index(fc))
-    return (0, len(FC_PREFERENCE))
-
 
 # -- which DA is worth reading, and which one wins when a bit has several ----
 #
@@ -78,24 +70,10 @@ BOOLEAN_STATUS_DAS = frozenset({
     "neut", "res", "neg", "pos", "zer",       # ACD/ACT sequence/residual
 })
 
-# The roots of a control (the `CO` side of a DO). A command SETS a point; it is
-# not a reading of it, and polling one would be asking the relay what we last
-# told it rather than what it sees.
-CONTROL_DA_ROOTS = frozenset({"Oper", "SBOw", "SBO", "Cancel"})
-
-
-def da_parts(da: str) -> tuple:
-    """`"Oper.ctlVal"` / `"Oper$ctlVal"` -> `("Oper", "ctlVal")`.
-
-    SCL writes the descent through an SDI with '.', MMS spells every level
-    with '$'; the two sources of a map use one each.
-    """
-    return tuple(p for p in (da or "").replace("$", ".").split(".") if p)
-
 
 def is_boolean_status(da) -> bool:
     """Is this leaf a boolean the GLV can paint as a bit?"""
-    parts = da_parts(da) if isinstance(da, str) else tuple(da)
+    parts = da_parts(da)
     return len(parts) == 1 and parts[0] in BOOLEAN_STATUS_DAS
 
 
@@ -145,7 +123,7 @@ def is_enum_status(da) -> bool:
     What separates them is the `sAddr` decoration, not the DA's name -- which
     is why the gate in the map resolver demands the rule, not just this test.
     """
-    parts = da_parts(da) if isinstance(da, str) else tuple(da)
+    parts = da_parts(da)
     return len(parts) == 1 and parts[0] in ENUM_STATUS_DAS
 
 
@@ -154,9 +132,10 @@ def da_rank(da, decorated: bool = False) -> tuple:
     enumerated one, then anything else, then a control -- `Oper.*` strictly
     last.
 
-    The FC preference above cannot rescue this one: an SCD names the DA, and a
+    An FC preference cannot rescue this one, which is why the rank is over the
+    DA's NAME and not over `py61850.fc_read_rank`: an SCD names the DA, and a
     bit whose `Oper.ctlVal` was kept and whose `stVal` was thrown away never
-    reaches `fc_rank` with a status candidate to choose. Measured on
+    reaches an FC comparison with a status candidate to choose. Measured on
     `samples/substation_demo.scd`: `LOCSTA` and 86 other bits of the IED
     `QPC1_LT2_UPC1` resolved to `Oper.ctlVal` under a plain first-wins.
 
@@ -168,9 +147,8 @@ def da_rank(da, decorated: bool = False) -> tuple:
     purpose -- renumbering `(1,)` and `(2,)` would disturb everything that
     already compares against them.
     """
-    parts = da_parts(da) if isinstance(da, str) else tuple(da)
-    if parts and (parts[0] in CONTROL_DA_ROOTS
-                  or parts[-1].startswith("ctlVal")):
+    parts = da_parts(da)
+    if fc_is_control_attribute(parts):
         return (2,)
     if decorated:
         return (0, 1) if is_enum_status(parts) or is_boolean_status(parts) \

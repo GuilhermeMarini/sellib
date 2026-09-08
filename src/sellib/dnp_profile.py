@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from sellib.scl._xmlsafe import reject_dtd_in_bytes
+from py61850.scl import reject_dtd_in_bytes
 
 # The schema namespaces seen in the corpus. Read the element's own namespace
 # rather than matching either of these: a third revision should degrade to

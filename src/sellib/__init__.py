@@ -30,10 +30,12 @@ What is inside:
     Per-relay-model registries: block/bit conventions, and the Relay Word names
     a DNP map may legally use.
 ``sellib.scl``
-    IEC 61850 SCL/SCD: IEDs, GOOSE control blocks and VLANs, ExtRef
-    subscriptions, functional constraints, and SEL's ``sAddr`` addressing.
-    Vendor-neutral apart from the ``db:`` grammar, which is SEL's convention
-    living inside a standard format.
+    What an IEC 61850 SCL/SCD holds that is SEL's: the ``db:`` grammar inside
+    the standard ``sAddr`` attribute, the ``pubRxStatus`` GOOSE health bit
+    inside a ``Private`` block, and the shipped bit -> MMS item tables.
+    Reading the file itself -- the IEDs, the type templates, the
+    ``Communication`` section, the instance model -- is ``py61850.scl``'s,
+    for any vendor; this reads its own half off those model nodes.
 ``sellib.match``
     Cross-match the relays in an RDB against the IEDs in an SCD.
 ``sellib.dnp_profile``
@@ -60,4 +62,4 @@ __all__ = [
     "writable_data_dir",
 ]
 
-__version__ = "2.2.1"
+__version__ = "3.0.0"

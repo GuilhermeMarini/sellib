@@ -33,7 +33,7 @@ for relay in info.relays:
 | `sellib.gle` | QuickSet logic diagrams — parse, and render a page to SVG |
 | `sellib.selogic` | SELOGIC equations: parse, compare by equivalence, normalise settings |
 | `sellib.models` | per-model registries: block conventions, and valid Relay Word names |
-| `sellib.scl` | IEC 61850 SCL/SCD: IEDs, GOOSE, VLANs, ExtRefs, functional constraints, SEL `sAddr` |
+| `sellib.scl` | what an SCL/SCD holds that is SEL's: the `sAddr` `db:` grammar, GOOSE health bits, the bit → MMS item tables. The standard half is [`py61850`](https://github.com/GuilhermeMarini/py61850) |
 | `sellib.match` | cross-match an RDB's relays against an SCD's IEDs |
 | `sellib.dnp_profile` | SEL DNP3 device profile bundles |
 
@@ -49,6 +49,20 @@ index padding (`BI_1` on a 411L, `BI_00` on a 751).
 Writing a Compound File back out — needed whenever an edit grows a stream — is
 [`cfbwrite`](https://github.com/GuilhermeMarini/cfbwrite), a separate library.
 
+## What is not here
+
+Reading an SCL file as an IEC 61850-6 object model — the document, the
+`DataTypeTemplates` pool, the `Communication` section, a per-IED tree of
+logical nodes, datasets, control blocks and `ExtRef`s — is
+[`py61850`](https://github.com/GuilhermeMarini/py61850), which sellib depends
+on. None of that is SEL's, and a Siemens or GE file needs exactly the same
+reader.
+
+What stayed here is what only SEL writes: the `db:` grammar inside the
+standard `sAddr` attribute, and the `pubRxStatus` health bit inside a
+`<Private>` block. Both are read off `py61850` model nodes, so the two
+libraries never parse one file twice and cannot come to disagree about it.
+
 ## Data
 
 The per-model registries ship with the package. `configure(user_data_dir=...)`
@@ -61,7 +75,7 @@ at runtime without shipping a new release and without repeating the rest.
 pip install sellib
 ```
 
-Python 3.10+. Extracted from
+Python 3.10+, and `py61850` for the standard half of an SCL file. Extracted from
 [PAC CT](https://github.com/GuilhermeMarini/pac-ct), where all of it is
 exercised against a real substation corpus.
 
