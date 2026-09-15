@@ -32,6 +32,18 @@ dependencies = [
     # longer has to name a pre-release. Keep it that way. PEP 440 sorts a
     # `.devN` BEFORE its release, so naming one is both unnecessary once the
     # final exists and a standing invitation for a resolver to install it.
+    #
+    # **Unbounded above, deliberately -- do not add a ceiling here.** This
+    # package only READS through `py61850.scl` and touches nothing in its edit
+    # layer, so it is compatible with every line published so far, and
+    # `requires-python` is what already makes an unbounded pin safe: 0.5.0
+    # declares `>=3.13`, so a resolver on 3.10-3.12 is served 0.4.0 and one on
+    # 3.13+ is served 0.5.0. Both work. Measured on 2026-09-15 rather than
+    # assumed: 275 tests pass here against py61850 0.5.0 on Python 3.14.6.
+    #
+    # A ceiling would also break the consumer. `pac-ct` installs this package
+    # AND py61850 together and pins `py61850>=0.5.0,<0.6`; a `<0.5` here would
+    # leave that resolution with no solution at all.
     "py61850>=0.3.0",
 ]
 
